@@ -8,6 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -42,7 +43,6 @@ func CreateOrUpdate(ctx context.Context, log logr.Logger, c client.Client, obj r
 		fns = append(fns, func(src, dest runtime.Object) {
 			// clusterIp cannot be updated on a service, so copy the field
 			dest.(*corev1.Service).Spec.ClusterIP = src.(*corev1.Service).Spec.ClusterIP
-			dest.(*corev1.Service).ObjectMeta.ResourceVersion = src.(*corev1.Service).ObjectMeta.ResourceVersion
 		})
 	}
 
@@ -70,6 +70,10 @@ func createOrUpdate(ctx context.Context, c client.Client, obj runtime.Object, mu
 		return controllerutil.OperationResultCreated, nil
 	}
 
+	if err := setMatchingResourceVersion(existing, obj); err != nil {
+		return controllerutil.OperationResultNone, err
+	}
+
 	for _, fn := range mutateFn {
 		fn(existing, obj)
 	}
@@ -82,4 +86,22 @@ func createOrUpdate(ctx context.Context, c client.Client, obj runtime.Object, mu
 		return controllerutil.OperationResultNone, err
 	}
 	return controllerutil.OperationResultUpdated, nil
+}
+
+// setMatchingResourceVersion sets the ResourceVersion to be the same as the
+// first argument
+func setMatchingResourceVersion(from, to runtime.Object) error {
+
+	src, err := meta.Accessor(from)
+	if err != nil {
+		return err
+	}
+
+	dest, err := meta.Accessor(to)
+	if err != nil {
+		return err
+	}
+
+	dest.SetResourceVersion(src.GetResourceVersion())
+	return nil
 }
